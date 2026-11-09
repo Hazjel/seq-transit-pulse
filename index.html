@@ -1,0 +1,582 @@
+<title>SEQ Transit in Motion</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a full-bleed night map of the timetable; one signage-style control panel floats over it. */
+:root {
+  --night: #070b14;      /* ground, the network at night */
+  --panel: rgba(9, 14, 26, 0.86);
+  --line: #24304a;       /* hairlines */
+  --ink: #e9edf5;        /* primary text */
+  --dim: #8d97ab;        /* secondary text */
+  --bus: #ff5a4e; --rail: #4f9bff; --lrail: #3ddc84; --ferry: #ffc233;
+  --flow: #ffd9a0;
+  --ui: "Barlow Semi Condensed", "Arial Narrow", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--night); color: var(--ink); font-family: var(--ui); overflow: hidden; }
+#map { position: fixed; inset: 0; background: var(--night); }
+/* Pixel city: an isometric camera, rendered at low resolution and scaled up with hard pixel edges. */
+#map.pixel { background: #eee4cb; }
+.centre { position: fixed; z-index: 2; top: calc(64px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); background: var(--panel); }
+.centre[hidden] { display: none; }
+.panel {
+  position: fixed; z-index: 2;
+  top: calc(16px + env(safe-area-inset-top, 0px)); left: max(16px, env(safe-area-inset-left, 0px));
+  width: 340px; max-width: calc(100vw - 32px);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 14px;
+  backdrop-filter: blur(6px);
+}
+h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: 0.01em; }
+.sub { margin: 2px 0 0; font-size: 14px; color: var(--dim); line-height: 1.35; }
+.clockrow { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.clock { font-size: 56px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.moving { text-align: right; font-size: 14px; color: var(--dim); }
+.moving b { display: block; font-size: 26px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+#playyears { white-space: nowrap; }
+button, .seg label {
+  font: 600 15px var(--ui); color: var(--ink); background: transparent;
+  border: 1px solid var(--line); border-radius: 4px; padding: 7px 12px; cursor: pointer;
+}
+button:hover, .seg label:hover { border-color: var(--dim); }
+button:focus-visible, .seg label:focus-within, input[type=range]:focus-visible { outline: 2px solid var(--flow); outline-offset: 2px; }
+#play { min-width: 76px; }
+input[type=range] { flex: 1; min-width: 0; accent-color: var(--flow); }
+.group { display: flex; flex-direction: column; gap: 6px; }
+.label { font-size: 13px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label { padding: 6px 10px; }
+.seg label:has(input:checked) { background: var(--ink); color: var(--night); border-color: var(--ink); }
+.modes label:has(input:checked) { background: transparent; color: var(--ink); }
+.modes label { display: inline-flex; align-items: center; gap: 7px; }
+.modes .dot { width: 10px; height: 10px; border-radius: 50%; }
+.modes label:not(:has(input:checked)) { opacity: 0.4; }
+.note { font-size: 12.5px; color: var(--dim); line-height: 1.4; margin: 0; }
+.years { display: grid; grid-template-columns: repeat(12, 1fr); align-items: end; gap: 3px; height: 54px; }
+.years button { padding: 0; border: 0; border-radius: 2px 2px 0 0; background: var(--line); min-width: 0; cursor: pointer; }
+.years button[aria-pressed="true"] { background: var(--flow); }
+.years button:hover { background: var(--dim); }
+.yearrow { display: flex; justify-content: space-between; font-size: 12px; color: var(--dim); }
+.stat { font-size: 15px; line-height: 1.35; }
+.stat b { font-variant-numeric: tabular-nums; }
+.lang { position: fixed; z-index: 2; top: calc(16px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); background: var(--panel); }
+.status { position: fixed; inset: 0; display: grid; place-items: center; color: var(--dim); font-size: 18px; z-index: 1; }
+.status[hidden] { display: none; }
+@media (max-width: 640px) {
+  .panel { top: auto; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); left: max(12px, env(safe-area-inset-left, 0px));
+           right: max(12px, env(safe-area-inset-right, 0px)); width: auto; max-width: none; gap: 10px; padding: 14px; }
+  .clock { font-size: 40px; }
+  .hide-sm { display: none; }
+}
+</style>
+
+<div id="map" role="img" aria-label="Map of public transport passengers moving across South East Queensland"></div>
+<div class="status" id="status">Loading the data…</div>
+
+<button class="lang" id="lang" type="button">Bahasa Indonesia</button>
+<button class="centre" id="centre" type="button" data-t="centre">City centre</button>
+
+<section class="panel" aria-label="Controls">
+  <div>
+    <h1 data-t="title">SEQ Transit in Motion</h1>
+    <p class="sub" data-t="sub">Passengers from Translink origin-destination data, 2016 to 2026: where they board and where they get off, by month and time of day.</p>
+  </div>
+  <div class="group">
+    <span class="label" data-t="style">Map style</span>
+    <div class="seg" id="style">
+      <label><input type="radio" name="style" value="pixel" checked><span data-t="pixel">Pixel city</span></label>
+      <label><input type="radio" name="style" value="night"><span data-t="night">Night network</span></label>
+    </div>
+  </div>
+  <div class="group">
+    <span class="label" data-t="flows">Time of day (OD data)</span>
+    <div class="seg" id="flows">
+      <label><input type="radio" name="flows" value="am" checked><span data-t="am">Weekday to 08:30</span></label>
+      <label><input type="radio" name="flows" value="mid"><span data-t="mid">08:30 to 15:00</span></label>
+      <label><input type="radio" name="flows" value="pm"><span data-t="pm">15:00 to 19:00</span></label>
+      <label><input type="radio" name="flows" value="eve"><span data-t="eve">After 19:00</span></label>
+      <label><input type="radio" name="flows" value="wkd"><span data-t="wkd">Weekend</span></label>
+      <label><input type="radio" name="flows" value="off"><span data-t="off">Off</span></label>
+    </div>
+    <div class="years" id="years" role="group" aria-label="Year of passenger data"></div>
+    <div class="yearrow"><span>2016</span><span id="yearsel">Jul 2026</span><span>2026</span></div>
+    <div class="controls"><button id="playyears" type="button" data-t="playyears">Play 2016 to 2026</button><span class="note" id="bcount"></span></div>
+    <div class="stat" id="stat"></div>
+  </div>
+  <div class="group">
+    <span class="label" data-t="modes">Modes</span>
+    <div class="seg modes" id="modes">
+      <label><input type="checkbox" value="0" checked><i class="dot" style="background:var(--bus)"></i><span data-t="m0">Bus</span></label>
+      <label><input type="checkbox" value="1" checked><i class="dot" style="background:var(--rail)"></i><span data-t="m1">Rail</span></label>
+      <label><input type="checkbox" value="2" checked><i class="dot" style="background:var(--lrail)"></i><span data-t="m2">Light rail</span></label>
+      <label><input type="checkbox" value="3" checked><i class="dot" style="background:var(--ferry)"></i><span data-t="m3">Ferry</span></label>
+    </div>
+  </div>
+  <p class="note hide-sm" data-t="note"></p>
+  <p class="note" data-t="src"></p>
+</section>
+
+<script src="https://unpkg.com/deck.gl@9.0.38/dist.min.js"></script>
+<script>
+const TEXT = {
+  en: { title: 'SEQ Transit in Motion', sub: 'Passengers from Translink origin-destination data, 2016 to 2026: where they board and where they get off, by month and time of day.',
+        flows: 'Time of day (OD data)',
+        am: 'Weekday to 08:30', mid: '08:30 to 15:00', pm: '15:00 to 19:00', eve: 'After 19:00', wkd: 'Weekend', off: 'Off', modes: 'Modes',
+        full: { am: 'Weekdays, midnight to 08:29', mid: 'Weekdays, 08:30 to 14:59', pm: 'Weekdays, 15:00 to 18:59 (evening peak)',
+                eve: 'Weekdays, 19:00 to midnight', wkd: 'Weekends' },
+        perwkd: 'trips per weekend day', boardings: 'boardings per day', allrail: 'all rail lines (the OD data does not name the line)',
+        noboard: 'no boardings recorded for this route in this period',
+        m0: 'Bus', m1: 'Rail', m2: 'Light rail', m3: 'Ferry', lang: 'Bahasa Indonesia',
+        covid: 'COVID low', covered: 'Route marks cover', ofboard: 'of boardings (routes renamed or withdrawn since have no line on the current map).', paxpath: 'Passengers', perday: 'trips per weekday', endcbd: 'end in the CBD', startcbd: 'start in the CBD',
+        playyears: 'Play 2016 to 2026', stopyears: 'Stop', buildings: 'buildings in OSM, highlighted = first mapped this year',
+        style: 'Map style', pixel: 'Pixel city', night: 'Night network', centre: 'City centre',
+        note: "Every number on this map comes from the Translink origin-destination files (monthly boardings from stop to stop, by route and time of day); the GTFS timetable is used only to place stops and draw route lines. Large marks moving along the route lines show route activity: one per 150 boardings per day on that route (a bus or ferry route's figure split between its two directions; rail and light rail shared across their lines, as the OD data does not name the line). They show how busy each route is, not where vehicles are. Small moving dots are passengers on the 400 busiest stop-to-stop trips, drawn along the route they rode (rail and light rail along the shortest track path, as the OD data does not name the line), one dot per 40 trips per day, on one scale for every year; their speed on screen is illustrative, as the OD data has no travel times. Buildings are inner Brisbane as mapped in OpenStreetMap on 1 July of each year: growth mostly shows mapping catching up, not construction. The rest of SEQ shows about 1.5 million buildings: 303,357 from today's OSM (Geofabrik extract, 8 Nov 2026) and 1.2 million Microsoft machine-learned footprints where OSM has none (heights mostly model estimates). From April 2026 the OD data covers more trips. Drag to pan, right-drag to tilt.",
+        src: 'Data: Translink Origin-Destination Trips (CC BY 4.0); Translink SEQ GTFS for stop locations and route lines only (CC BY 4.0); State of Queensland. Base map and buildings © OpenStreetMap contributors (ODbL); extra buildings Microsoft Global ML Building Footprints (ODbL). Team Pengen Lulus, DataNova 2026.',
+        loading: 'Loading the data…', failed: 'The data could not be loaded. Reload the page to try again.' },
+  id: { title: 'SEQ Transit Bergerak', sub: 'Penumpang dari data asal-tujuan (OD) Translink, 2016 sampai 2026: di mana mereka naik dan turun, per bulan dan waktu.',
+        flows: 'Waktu (data OD)',
+        am: 'Hari kerja s.d. 08.30', mid: '08.30 s.d. 15.00', pm: '15.00 s.d. 19.00', eve: 'Setelah 19.00', wkd: 'Akhir pekan', off: 'Mati', modes: 'Moda',
+        full: { am: 'Hari kerja, tengah malam s.d. 08.29', mid: 'Hari kerja, 08.30 s.d. 14.59', pm: 'Hari kerja, 15.00 s.d. 18.59 (jam sibuk sore)',
+                eve: 'Hari kerja, 19.00 s.d. tengah malam', wkd: 'Akhir pekan' },
+        perwkd: 'perjalanan per hari akhir pekan', boardings: 'penumpang naik per hari', allrail: 'semua jalur kereta (data OD tidak menyebut nama jalurnya)',
+        noboard: 'tidak ada penumpang tercatat untuk rute ini pada periode ini',
+        m0: 'Bus', m1: 'Kereta', m2: 'Light rail', m3: 'Feri', lang: 'English',
+        covid: 'titik terendah COVID', covered: 'Penanda rute mencakup', ofboard: 'penumpang naik (rute yang sudah berganti nama atau dihapus tidak punya garis di peta hari ini).', paxpath: 'Penumpang', perday: 'perjalanan per hari kerja', endcbd: 'berakhir di CBD', startcbd: 'berangkat dari CBD',
+        playyears: 'Putar 2016 sampai 2026', stopyears: 'Berhenti', buildings: 'bangunan di OSM, yang menyala = pertama dipetakan tahun ini',
+        style: 'Gaya peta', pixel: 'Kota piksel', night: 'Jaringan malam', centre: 'Pusat kota',
+        note: 'Semua angka di peta ini berasal dari file asal-tujuan (OD) Translink (jumlah penumpang per bulan dari halte ke halte, per rute dan waktu); jadwal GTFS hanya dipakai untuk menaruh halte dan menggambar garis rute. Penanda besar yang bergerak di garis rute menunjukkan aktivitas rute: satu penanda per 150 penumpang naik per hari di rute itu (angka rute bus atau feri dibagi ke kedua arahnya; kereta dan light rail dibagi ke semua jalurnya karena data OD tidak menyebut nama jalur). Penanda ini menunjukkan seberapa ramai rute, bukan posisi kendaraan. Titik kecil yang mengalir adalah penumpang pada 400 perjalanan halte-ke-halte tersibuk, digambar sepanjang rute yang dinaiki (kereta dan light rail lewat jalur rel terpendek, karena data OD tidak menyebut nama jalurnya), satu titik per 40 perjalanan per hari, dengan skala yang sama untuk semua tahun; kecepatannya di layar hanya ilustrasi karena data OD tidak memuat waktu tempuh. Bangunan adalah pusat Brisbane seperti yang dipetakan di OpenStreetMap pada 1 Juli tiap tahun: pertambahannya sebagian besar karena pemetaan makin lengkap, bukan pembangunan. Wilayah SEQ lainnya menampilkan sekitar 1,5 juta bangunan: 303.357 dari OSM saat ini (ekstrak Geofabrik, 8 Nov 2026) dan 1,2 juta jejak bangunan hasil machine learning Microsoft di tempat yang belum dipetakan OSM (tinggi sebagian besar perkiraan model). Sejak April 2026 data OD mencakup lebih banyak perjalanan. Geser untuk memindah peta, klik kanan dan geser untuk memiringkan.',
+        src: 'Data: Translink Origin-Destination Trips (CC BY 4.0); Translink SEQ GTFS hanya untuk lokasi halte dan garis rute (CC BY 4.0); State of Queensland. Bangunan © kontributor OpenStreetMap (ODbL); bangunan tambahan Microsoft Global ML Building Footprints (ODbL). Tim Pengen Lulus, DataNova 2026.',
+        loading: 'Memuat data…', failed: 'Data gagal dimuat. Muat ulang halaman untuk mencoba lagi.' },
+};
+const MODE_RGB = [[255, 90, 78], [79, 155, 255], [61, 220, 132], [255, 194, 51]];
+const NET_RGB = [[70, 46, 54], [40, 62, 104], [30, 76, 56], [82, 70, 38]];
+const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let lang = 'en';
+try { if (localStorage.getItem('seq-motion-lang') === 'id') lang = 'id'; } catch (e) {}
+const $ = (id) => document.getElementById(id);
+const PERIODS = ['am', 'mid', 'pm', 'eve', 'wkd'];
+const state = { flows: 'am', month: -1, style: 'pixel', modes: new Set([0, 1, 2, 3]) };
+// Two looks over the same data. Pixel: warm daylight palette, buildings tinted by height like a tiny model city.
+const LOOK = {
+  pixel: { water: [126, 178, 214], park: [163, 204, 120], river: [126, 178, 214], net: [[214, 160, 150], [150, 175, 215], [150, 200, 160], [220, 195, 130]],
+           build: (h) => (h > 60 ? [196, 150, 104] : h > 20 ? [221, 186, 138] : [236, 214, 178]), fresh: [240, 96, 64],
+           desire: [40, 52, 86, 60], people: [28, 38, 70, 235],
+           sea: [150, 192, 222], road: [[255, 250, 240], [250, 238, 214], [236, 224, 200]], label: [70, 60, 50, 220] },
+  night: { water: [16, 30, 52], park: [16, 34, 26], river: [16, 30, 52], net: NET_RGB,
+           build: () => [52, 64, 92], fresh: [255, 190, 120], desire: [255, 217, 160, 40], people: [255, 226, 180, 230],
+           sea: [12, 24, 42], road: [[44, 52, 70], [36, 44, 60], [30, 37, 52]], label: [141, 151, 171, 220] },
+};
+const MON = { en: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+              id: ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'] };
+const monthLabel = (key) => { const [y, m] = key.split('-'); return MON[lang][+m - 1] + ' ' + y; };
+const fmt = (n) => n.toLocaleString(lang === 'id' ? 'id-ID' : 'en-AU');
+const pct = (x) => (x * 100).toFixed(1).replace('.', lang === 'id' ? ',' : '.') + '%';
+let data = null, deckgl = null;
+
+function applyText() {
+  const T = TEXT[lang];
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-t]').forEach((el) => {
+    const k = el.dataset.t;
+    if (k === 'playyears') el.textContent = yearTimer ? T.stopyears : T.playyears;
+    else if (T[k]) el.textContent = T[k];
+  });
+  $('lang').textContent = T.lang;
+  document.title = T.title;
+  if (!data) $('status').textContent = T.loading;
+}
+
+function undelta(a, scale) {
+  const out = new Array(a.length); let s = 0;
+  for (let i = 0; i < a.length; i++) { s += a[i]; out[i] = s / scale; }
+  return out;
+}
+
+// Cumulative share of length along a lon/lat path (x shrunk by cos 27.5 deg), plus its length in km.
+function along(path) {
+  const cum = [0];
+  for (let i = 1; i < path.length; i++)
+    cum.push(cum[i - 1] + Math.hypot((path[i][0] - path[i - 1][0]) * 0.887, path[i][1] - path[i - 1][1]));
+  const tot = cum[cum.length - 1] || 1;
+  return { cum: cum.map((c) => c / tot), km: tot * 111 };
+}
+function pointAt(path, cum, f) {
+  let lo = 0, hi = cum.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (cum[mid] <= f) lo = mid; else hi = mid; }
+  const a = path[lo], b = path[hi], u = cum[hi] === cum[lo] ? 0 : (f - cum[lo]) / (cum[hi] - cum[lo]);
+  return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u];
+}
+
+async function load() {
+  const [net, fl, bl, land, region] = await Promise.all(['network_routes.json', 'flows_od.json', 'buildings.json', 'land.json', 'region_seq.json'].map((f) => fetch(f).then((r) => {
+    if (!r.ok) throw new Error(f); return r.json();
+  })));
+  const network = net.map((d) => {
+    const x = undelta(d.x, 1e4), y = undelta(d.y, 1e4), path = x.map((v, i) => [v, y[i]]);
+    return { m: d.m, r: d.r, n: d.n, path, ...along(path) };
+  });
+  // Passenger paths: each busy stop-to-stop pair follows its route shape, or the shortest path on that mode's network,
+  // with the cumulative share of length at every point so a dot can be placed at any fraction of the trip.
+  const segs = fl.segs.map((s) => {
+    const x = undelta(s.x, 1e5), y = undelta(s.y, 1e5), path = x.map((v, i) => [v, y[i]]);
+    return { path, cum: along(path).cum, len: s.len };
+  });
+  let maxTrips = 0;
+  for (const mo of fl.months) for (const k of PERIODS) for (const f of mo[k].flows) maxTrips = Math.max(maxTrips, f[1]);
+  const buildings = bl.b.map(([y0, y1, h, dx, dy]) => {
+    const x = undelta(dx, 1e5), y = undelta(dy, 1e5);
+    return { y0, y1, h, poly: x.map((v, i) => [v, y[i]]) };
+  });
+  // Passenger tokens: one moving dot per 40 trips per day on each path, spread in phase so the stream is continuous;
+  // a dot takes 4 s plus 0.5 s per km of real path (illustrative: the OD data has no travel times).
+  for (const mo of fl.months) for (const k of PERIODS) {
+    const tok = [];
+    mo[k].flows.forEach(([s, trips, m], j) => {
+      const n = Math.max(1, Math.round(trips / 40)), dur = 4 + segs[s].len / 2000;
+      for (let i = 0; i < n; i++) tok.push({ s, m, ph: (i / n + j * 0.618) % 1, dur });
+    });
+    mo[k].tokens = tok;
+  }
+  const roads = ['motorway', 'trunk', 'primary'].flatMap((k, i) => region.roads[k].map((p) => ({ k: i, p })));
+  return { network, months: fl.months, segs, maxTrips, buildings, land, region, roads };
+}
+
+const bCache = {};
+function buildingsFor(year) {
+  if (!bCache[year]) bCache[year] = data.buildings.filter((b) => b.y0 <= year && b.y1 >= year);
+  return bCache[year];
+}
+
+// Inner Brisbane comes from buildings.json (with year history), so the SEQ tiles leave this box out.
+const INNER = [153.005, -27.490, 153.050, -27.445], CACHE_TILES = 60;
+// Every building is drawn at every zoom; zoomed out, fewer tiles (nearest the view centre) keep the load in check.
+const maxTiles = (zoom) => (zoom < 11.5 ? 4 : zoom < 12.5 ? 8 : 12);
+// Building outlines only close up; further out every building (inner city included) is lit a shade darker instead,
+// so the whole city reads the same at any zoom without the cost of an outline per wall. Lighting is a uniform, so
+// crossing this zoom never rebuilds building geometry.
+const OUTLINE_ZOOM = 13.5;
+const BLD_LIGHT = { ambient: 0.55, diffuse: 0.55, shininess: 0 }, BLD_LIGHT_FAR = { ambient: 0.42, diffuse: 0.45, shininess: 0 };
+const tileCache = new Map();
+let lastMove = 0;  // time of the last camera change, so tile downloads wait until the view settles
+// A tile is unpacked once into flat typed arrays (deck.gl binary polygons): 1.5 million buildings as millions of
+// small JS objects would keep the browser busy collecting garbage while zooming.
+function decodeTile(rows) {
+  let nv = 0;
+  for (const r of rows) nv += r[1].length;
+  const pos = new Float64Array(nv * 2), elev = new Float32Array(nv), starts = new Uint32Array(rows.length + 1);
+  const h = new Float32Array(rows.length);
+  let v = 0;
+  rows.forEach(([hh, dx, dy], i) => {
+    starts[i] = v; h[i] = hh;
+    let x = 0, y = 0;
+    for (let j = 0; j < dx.length; j++, v++) {
+      x += dx[j]; y += dy[j];
+      pos[v * 2] = x / 1e5; pos[v * 2 + 1] = y / 1e5; elev[v] = hh;
+    }
+  });
+  starts[rows.length] = v;
+  return { n: rows.length, pos, elev, starts, h, colours: {} };
+}
+// Per-vertex colours by height, made once per map style and kept with the tile.
+function tileData(t, style) {
+  const key = style;
+  if (!t.colours[key]) {
+    const col = new Uint8Array(t.elev.length * 3);
+    for (let i = 0; i < t.n; i++) {
+      const c = LOOK[style].build(t.h[i]);
+      for (let v = t.starts[i]; v < t.starts[i + 1]; v++) col.set(c, v * 3);
+    }
+    t.colours[key] = { length: t.n, startIndices: t.starts, attributes: {
+      getPolygon: { value: t.pos, size: 2 }, getElevation: { value: t.elev, size: 1 }, getFillColor: { value: col, size: 3 } } };
+  }
+  return t.colours[key];
+}
+// Real footprints of the ~9 km tiles in view, nearest the view centre first (at most maxTiles).
+function visibleSeqBuildings() {
+  if (!data.bidx || !deckgl || !deckgl.viewState) return [];
+  const [w, s, e, n] = deckgl.getViewports()[0].getBounds(), T = data.bidx.tile, all = [];
+  const cx = deckgl.viewState.longitude / T, cy = deckgl.viewState.latitude / T;
+  for (let tx = Math.floor(w / T); tx <= Math.floor(e / T); tx++)
+    for (let ty = Math.floor(s / T); ty <= Math.floor(n / T); ty++)
+      if (data.bidx.tiles[tx + '_' + ty]) all.push([(tx + 0.5 - cx) ** 2 + (ty + 0.5 - cy) ** 2, tx + '_' + ty]);
+  const keys = all.sort((a, b) => a[0] - b[0]).slice(0, maxTiles(deckgl.viewState.zoom)).map((a) => a[1]);
+  for (const k of tileCache.keys()) {  // forget the oldest tiles out of view so panning around SEQ stays light
+    if (tileCache.size <= CACHE_TILES) break;
+    if (!keys.includes(k)) tileCache.delete(k);
+  }
+  // As web maps do, new tiles are only fetched once the view has settled, and downloaded tiles are unpacked at most
+  // two per frame, so zooming and panning never stall on building data.
+  if (performance.now() - lastMove > 300) {
+    for (const k of keys) {
+      if (tileCache.has(k)) continue;
+      tileCache.set(k, null);
+      fetch('bld/' + k + '.json').then((r) => r.json()).then((j) => { tileCache.set(k, { raw: j.b }); render(); })
+        .catch(() => tileCache.delete(k));
+    }
+  }
+  let budget = 2;
+  for (const k of keys) {
+    const t = tileCache.get(k);
+    if (t && t.raw && budget-- > 0) tileCache.set(k, decodeTile(t.raw));
+  }
+  return keys.filter((k) => tileCache.get(k) && tileCache.get(k).pos).map((k) => ({ k, tile: tileCache.get(k) }));
+}
+
+// Results that only change with their inputs are kept, so layers get the same array back and deck.gl skips the work.
+const memo = {};
+function cached(name, key, make) {
+  if (!memo[name] || memo[name].key !== key) memo[name] = { key, value: make() };
+  return memo[name].value;
+}
+const NONE = [];
+
+// Route activity from the OD data: on every route line, one mark per MOVER_PER boardings per day on that route in the
+// chosen month and time of day. The OD data counts a route, not a direction, so a bus or ferry route's figure is split
+// evenly between its direction lines; rail and light rail are one figure each ("Rail", "GCLR"), split across their lines.
+// Marks show how busy a route is, not where vehicles are; their speed is illustrative.
+const MOVER_PER = 150;
+// Share of the month's boardings that land on a route line of today's map (renamed or withdrawn routes have none).
+function moverCoverage(mo, k) {
+  const drawn = new Set(data.network.map(odRoute));
+  let all = 0, on = 0;
+  for (const [r, b] of Object.entries(mo[k].routes)) { all += b; if (drawn.has(r)) on += b; }
+  return all ? on / all : 0;
+}
+const odRoute = (d) => (d.m === 1 ? 'Rail' : d.m === 2 ? 'GCLR' : d.r);
+function routeMovers(mo, k) {
+  const share = {};
+  for (const d of data.network) share[odRoute(d)] = (share[odRoute(d)] || 0) + 1;
+  const out = [];
+  data.network.forEach((d, i) => {
+    const b = mo[k].routes[odRoute(d)];
+    if (!b || !state.modes.has(d.m)) return;
+    // Proportional, no minimum: a line worth 0.3 marks gets one on 30% of lines (fixed per line), so quiet months stay quiet.
+    const x = b / share[odRoute(d)] / MOVER_PER, n = Math.floor(x) + ((i * 0.6180339) % 1 < x % 1 ? 1 : 0), dur = 8 + d.km * 1.2;
+    for (let j = 0; j < n; j++) out.push({ i, m: d.m, ph: (j / n + i * 0.37) % 1, dur });
+  });
+  return out;
+}
+// Roads and transit layers ignore depth, so streets, routes, vehicles and passengers stay visible in front of the 3D buildings.
+const ON_TOP = { depthCompare: 'always' };
+
+function layers() {
+  const mo = data.months[state.month];
+  // Mode chips filter passengers too, by the main mode of each origin-destination pair.
+  const fkey = [state.month, state.flows, ...state.modes].join();
+  const flows = state.flows === 'off' ? NONE : cached('flows', fkey, () => mo[state.flows].flows.filter((f) => state.modes.has(f[2])));
+  const tokens = state.flows === 'off' ? NONE : cached('tokens', fkey, () => mo[state.flows].tokens.filter((k) => state.modes.has(k.m)));
+  const year = +mo.key.slice(0, 4);
+  const clockSec = performance.now() / 1000;
+  const people = tokens.map((k) => ({ m: k.m, p: pointAt(data.segs[k.s].path, data.segs[k.s].cum, (clockSec / k.dur + k.ph) % 1) }));
+  const period = state.flows === 'off' ? 'am' : state.flows;
+  const movers = cached('movers', [state.month, period, ...state.modes].join(), () => routeMovers(mo, period)).map((v) => {
+    const d = data.network[v.i];
+    return { m: v.m, p: pointAt(d.path, d.cum, (clockSec / v.dur + v.ph) % 1) };
+  });
+  const L = LOOK[state.style], st = state.style, seqTiles = visibleSeqBuildings();
+  const zoom = deckgl && deckgl.viewState ? deckgl.viewState.zoom : 14, far = zoom < OUTLINE_ZOOM;
+  const tier = zoom >= 11.5 ? 2 : zoom >= 9.5 ? 1 : 0;
+  const places = cached('places', tier, () => data.region.places.filter((p) => p[3] === 'city' || (p[3] === 'town' && tier >= 1) || tier === 2));
+  return [
+    // Regional base map from OpenStreetMap (sea, main roads, rivers, place names) so the whole network has context.
+    new deck.SolidPolygonLayer({ id: 'sea', data: data.region.sea, getPolygon: (p) => p, getFillColor: L.sea, updateTriggers: { getFillColor: st } }),
+    new deck.SolidPolygonLayer({ id: 'lakes', data: data.region.lakes || [], getPolygon: (p) => p, getFillColor: L.sea, updateTriggers: { getFillColor: st } }),
+    new deck.PathLayer({ id: 'roads', parameters: ON_TOP, data: data.roads, getPath: (r) => r.p, getColor: (r) => L.road[r.k],
+      getWidth: (r) => [70, 45, 28][r.k], widthMinPixels: 1, updateTriggers: { getColor: st } }),
+    new deck.PathLayer({ id: 'region-rivers', data: data.region.rivers, getPath: (p) => p, getColor: L.river, getWidth: 45,
+      widthMinPixels: 1, updateTriggers: { getColor: st } }),
+    new deck.TextLayer({ id: 'places', data: places, getPosition: (p) => [p[1], p[2]], getText: (p) => p[0],
+      getSize: (p) => (p[3] === 'suburb' ? 11 : 14), getColor: L.label, fontFamily: '"Barlow Semi Condensed", sans-serif',
+      fontWeight: 600, billboard: true, characterSet: 'auto', updateTriggers: { getColor: st } }),
+    new deck.PolygonLayer({ id: 'water', data: data.land.water, getPolygon: (p) => p, getFillColor: L.water, updateTriggers: { getFillColor: st } }),
+    new deck.PolygonLayer({ id: 'parks', data: data.land.parks, getPolygon: (p) => p, getFillColor: L.park, updateTriggers: { getFillColor: st } }),
+    new deck.PathLayer({ id: 'rivers', data: data.land.rivers, getPath: (r) => r.p, getWidth: (r) => r.w, getColor: L.river,
+      capRounded: true, jointRounded: true, updateTriggers: { getColor: st } }),
+    new deck.PolygonLayer({ id: 'buildings', data: buildingsFor(year), getPolygon: (b) => b.poly, extruded: true,
+      wireframe: st === 'pixel' && !far, getLineColor: [120, 84, 52, 200],
+      getElevation: (b) => b.h, getFillColor: (b) => (b.y0 === year && year > 2016 ? L.fresh : L.build(b.h)),
+      material: far ? BLD_LIGHT_FAR : BLD_LIGHT, updateTriggers: { getFillColor: [year, st] } }),
+    // The rest of SEQ, today's OSM: one layer per tile, so a newly loaded tile never makes the others rebuild.
+    // Same look as the inner city (colour by height, outlines in the pixel style).
+    ...seqTiles.map(({ k, tile }) => new deck.SolidPolygonLayer({ id: 'bld-' + k + '-' + st, data: tileData(tile, st),
+      _normalize: false, extruded: true, material: far ? BLD_LIGHT_FAR : BLD_LIGHT })),
+    // Outlines as in the inner city, pixel style and close up only (one extra line per wall is costly further out).
+    ...(st === 'pixel' && !far ? seqTiles : NONE).map(({ k, tile }) => new deck.SolidPolygonLayer({ id: 'bldw-' + k,
+      data: tileData(tile, st), _normalize: false, extruded: true, wireframe: true, filled: false, getLineColor: [120, 84, 52, 200] })),
+    new deck.PathLayer({ id: 'network', parameters: ON_TOP, data: data.network, getPath: (d) => d.path, getColor: (d) => L.net[d.m],
+      widthMinPixels: 1, widthMaxPixels: 2, getWidth: 20, pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 230],
+      updateTriggers: { getColor: st } }),
+    new deck.PathLayer({ id: 'desire', parameters: ON_TOP, data: flows, getPath: (f) => data.segs[f[0]].path, jointRounded: true, capRounded: true,
+      pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 200],
+      getWidth: (f) => 0.4 + 3 * Math.sqrt(f[1] / data.maxTrips), widthUnits: 'pixels', getColor: L.desire, updateTriggers: { getColor: st } }),
+    // Route activity marks (bigger, dark rim) and passengers (small, light rim), both coloured by mode, both from the OD data.
+    new deck.ScatterplotLayer({ id: 'movers', parameters: ON_TOP, data: movers, getPosition: (d) => d.p, getFillColor: (d) => MODE_RGB[d.m],
+      radiusMinPixels: 4, radiusMaxPixels: 7, getRadius: 60, stroked: true, getLineColor: [20, 24, 36, 230], lineWidthMinPixels: 1.2 }),
+    new deck.ScatterplotLayer({ id: 'people', parameters: ON_TOP, data: people, getPosition: (d) => d.p, getFillColor: (d) => MODE_RGB[d.m],
+      radiusMinPixels: 2, radiusMaxPixels: 4, getRadius: 30, stroked: true, getLineColor: [255, 255, 255, 160], lineWidthMinPixels: 0.5 }),
+  ];
+}
+
+// Hover labels, numbers from the OD data for the chosen month and time of day: a route line (boardings on that route;
+// the OD data lumps all rail lines as "Rail" and the Gold Coast light rail as "GCLR") or a passenger path (one OD pair).
+function tooltipText(o) {
+  if (!o) return null;
+  const T = TEXT[lang], k = state.flows === 'off' ? 'am' : state.flows, mo = data.months[state.month];
+  const when = `${T.full[k]}, ${monthLabel(mo.key)}`;
+  if (Array.isArray(o)) return `${T.paxpath}: ${T['m' + o[2]]}\n${fmt(Math.round(o[1]))} ${k === 'wkd' ? T.perwkd : T.perday}\n${when}`;
+  if (o.path) {
+    const odName = o.m === 1 ? 'Rail' : o.m === 2 ? 'GCLR' : o.r, n = mo[k].routes[odName];
+    const head = `${T['m' + o.m]} ${o.r}${o.n ? ' \u00b7 ' + o.n : ''}`;
+    return `${head}${o.m === 1 ? '\n' + T.allrail : ''}\n${n ? fmt(n) + ' ' + T.boardings : T.noboard}\n${when}`;
+  }
+  return null;
+}
+
+function render() {
+  if (deckgl) deckgl.setProps({ layers: layers() });
+}
+
+// One bar per month of passenger data, height = trips per weekday in the chosen period; the bars double as the year picker.
+function drawYears() {
+  const k = state.flows === 'off' ? 'am' : state.flows, T = TEXT[lang], per = k === 'wkd' ? T.perwkd : T.perday;
+  const max = Math.max(...data.months.map((m) => m[k].trips_per_day));
+  $('years').replaceChildren(...data.months.map((m, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.style.height = Math.max(4, Math.round(54 * m[k].trips_per_day / max)) + 'px';
+    b.setAttribute('aria-pressed', String(i === state.month));
+    const lab = monthLabel(m.key) + (m.key === '2020-04' ? ' (' + T.covid + ')' : '');
+    b.setAttribute('aria-label', lab);
+    b.title = lab + ': ' + fmt(m[k].trips_per_day) + ' ' + per;
+    b.addEventListener('click', () => { state.month = i; drawYears(); render(); });
+    return b;
+  }));
+  const m = data.months[state.month];
+  $('yearsel').textContent = monthLabel(m.key) + (m.key === '2020-04' ? ' (' + T.covid + ')' : '');
+  $('bcount').textContent = fmt(buildingsFor(+m.key.slice(0, 4)).length) + ' ' + T.buildings;
+  $('stat').innerHTML = state.flows === 'off' ? '' : `${T.full[k]}: <b>${fmt(m[k].trips_per_day)}</b> ${per}; ` +
+    `<b>${pct(m[k].to_cbd)}</b> ${T.endcbd}, <b>${pct(m[k].from_cbd)}</b> ${T.startcbd}. ` +
+    `${T.covered} <b>${pct(moverCoverage(m, k))}</b> ${T.ofboard}`;
+}
+
+// Pixel city uses a true isometric (orthographic) camera at 45 degrees and a low render resolution; night uses perspective.
+function applyStyle() {
+  const px = state.style === 'pixel';
+  $('map').classList.toggle('pixel', px);
+  if (!deckgl) return;
+  const vs = deckgl.viewState || deckgl.props.initialViewState;
+  deckgl.setProps({
+    views: new deck.MapView({ orthographic: px, controller: true }),
+    initialViewState: px ? { ...vs, pitch: 55, bearing: 45, transitionDuration: 600 } : { ...vs, pitch: 50, bearing: -18, transitionDuration: 600 },
+  });
+  setResolution(vs.zoom);
+  render();
+}
+
+// The pixel look only makes sense up close, where buildings fill the screen; zoomed out the map renders sharp.
+let lowRes = null;
+function setResolution(zoom) {
+  const want = state.style === 'pixel' && zoom >= 12.8;
+  if (want === lowRes || !deckgl) return;
+  lowRes = want;
+  deckgl.setProps({ useDevicePixels: want ? 0.5 : true });
+  $('map').classList.toggle('pixel', state.style === 'pixel');
+  $('map').querySelector('canvas')?.style.setProperty('image-rendering', want ? 'pixelated' : 'auto');
+}
+
+// The basemap covers all of South East Queensland (Gympie to the Gold Coast, Gatton to the sea); panning stops at its edge.
+const SEQ = [[152.25, -28.35], [153.65, -26.0]];
+const ZOOMS = { minZoom: 10.5, maxZoom: 17 };  // no further out: below this the buildings would be unreadable
+function constrain(v, zooming) {
+  const out = { ...v,
+    longitude: Math.min(SEQ[1][0], Math.max(SEQ[0][0], v.longitude)),
+    latitude: Math.min(SEQ[1][1], Math.max(SEQ[0][1], v.latitude)) };
+  // Zooming out eases the tilt, so the wider view reads as a map rather than a tilted sliver.
+  if (zooming) out.pitch = Math.min(v.pitch, Math.max(30, Math.min(55, (v.zoom - 7) * 12)));
+  return out;
+}
+
+function flyTo(v) {
+  if (!deckgl) return;
+  deckgl.setProps({ initialViewState: { ...v, ...ZOOMS, transitionDuration: 1200, transitionInterpolator: new deck.FlyToInterpolator() } });
+}
+function flyToCentre() {
+  const small = window.innerWidth < 640;
+  flyTo({ longitude: small ? 153.026 : 153.018, latitude: small ? -27.472 : -27.469, zoom: small ? 13.4 : 14.2,
+    pitch: 55, bearing: state.style === 'pixel' ? 45 : -20 });
+}
+
+let yearTimer = null;
+// Passenger dots flow continuously; with reduced motion the map redraws only when something changes.
+function tick() {
+  render();
+  if (!reduce) requestAnimationFrame(tick);
+}
+
+function toggleYears() {
+  const T = TEXT[lang];
+  if (yearTimer) { clearInterval(yearTimer); yearTimer = null; $('playyears').textContent = T.playyears; return; }
+  state.month = 0; drawYears(); render();
+  $('playyears').textContent = T.stopyears;
+  yearTimer = setInterval(() => {
+    if (state.month >= data.months.length - 1) { toggleYears(); return; }
+    state.month += 1; drawYears(); render();
+  }, 2500);
+}
+
+function wire() {
+  $('playyears').addEventListener('click', () => { if (data) toggleYears(); });
+  $('style').addEventListener('change', (e) => { state.style = e.target.value; lowRes = null; applyStyle(); });
+  $('centre').addEventListener('click', flyToCentre);
+  $('flows').addEventListener('change', (e) => { state.flows = e.target.value; if (data) { drawYears(); render(); } });
+  $('modes').addEventListener('change', () => {
+    state.modes = new Set([...document.querySelectorAll('#modes input:checked')].map((i) => +i.value)); render();
+  });
+  $('lang').addEventListener('click', () => {
+    lang = lang === 'en' ? 'id' : 'en';
+    try { localStorage.setItem('seq-motion-lang', lang); } catch (e) {}
+    applyText(); if (data) { drawYears(); render(); }
+  });
+}
+
+applyText(); wire();
+load().then((d) => {
+  data = d; $('status').hidden = true;
+  state.month = d.months.length - 1;
+  drawYears();
+  const small = window.innerWidth < 640;
+  $('map').classList.add('pixel');
+  deckgl = new deck.Deck({
+    parent: $('map'),
+    views: new deck.MapView({ orthographic: true, controller: true }),
+    initialViewState: { longitude: small ? 153.026 : 153.018, latitude: small ? -27.472 : -27.469, zoom: small ? 13.4 : 14.2, pitch: 55, bearing: 45, ...ZOOMS },
+    controller: true,
+    onViewStateChange: ({ viewState, interactionState }) => {
+      const v = constrain(viewState, interactionState && interactionState.isZooming);
+      deckgl.viewState = v; lastMove = performance.now(); setResolution(v.zoom); if (reduce) render();
+      return v;
+    },
+    pickingRadius: 6,  // thin route lines are easier to hover
+    getTooltip: ({ object }) => {
+      const text = tooltipText(object);
+      return text && { text, style: { background: '#0b1220', color: '#e9edf5', fontFamily: 'Barlow Semi Condensed, sans-serif',
+        fontSize: '14px', lineHeight: '1.35', maxWidth: '320px', whiteSpace: 'pre-line' } };
+    },
+    layers: [],
+  });
+  setResolution(small ? 13.4 : 14.2);
+  render(); requestAnimationFrame(tick);
+  // Whole-SEQ buildings are optional extras, fetched after the map appears; the map works without them.
+  fetch('bld/index.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
+    if (!j) return;
+    data.bidx = j;
+    render();
+  }).catch(() => {});
+}).catch(() => { $('status').textContent = TEXT[lang].failed; });
+</script>
