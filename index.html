@@ -29,6 +29,16 @@ body { background: var(--night); color: var(--ink); font-family: var(--ui); over
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
   padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 14px;
   backdrop-filter: blur(6px);
+  /* Never taller than the window (e.g. a 600 px Web Page object in Tableau): the panel scrolls instead of being cut. */
+  max-height: calc(100vh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; box-sizing: border-box;
+}
+/* Short windows: tighter spacing, long method note hidden (the data source line stays). */
+@media (max-height: 700px) {
+  .panel { gap: 9px; padding: 14px 14px 12px; }
+  .panel h1 { font-size: 19px; }
+  .panel .sub { font-size: 13px; }
+  .panel [data-t="note"] { display: none; }
 }
 h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: 0.01em; }
 .sub { margin: 2px 0 0; font-size: 14px; color: var(--dim); line-height: 1.35; }
