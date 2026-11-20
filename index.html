@@ -73,6 +73,10 @@ input[type=range] { flex: 1; min-width: 0; accent-color: var(--flow); }
 .years button:hover { background: var(--dim); }
 .yearrow { display: flex; justify-content: space-between; font-size: 12px; color: var(--dim); }
 .stat { font-size: 15px; line-height: 1.35; }
+.legend { font-size: 13px; color: var(--dim); line-height: 1.4; }
+.legend[hidden] { display: none; }
+.legend .ramp { height: 10px; border-radius: 2px; margin: 4px 0 2px; }
+.legend .ends { display: flex; justify-content: space-between; }
 .stat b { font-variant-numeric: tabular-nums; }
 .lang { position: fixed; z-index: 2; top: calc(16px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); background: var(--panel); }
 .status { position: fixed; inset: 0; display: grid; place-items: center; color: var(--dim); font-size: 18px; z-index: 1; }
@@ -102,6 +106,15 @@ input[type=range] { flex: 1; min-width: 0; accent-color: var(--flow); }
       <label><input type="radio" name="style" value="pixel" checked><span data-t="pixel">Pixel city</span></label>
       <label><input type="radio" name="style" value="night"><span data-t="night">Night network</span></label>
     </div>
+  </div>
+  <div class="group">
+    <span class="label" data-t="analysis">Round 2 analysis</span>
+    <div class="seg" id="analysis">
+      <label><input type="radio" name="analysis" value="off" checked><span data-t="a_off">Off</span></label>
+      <label><input type="radio" name="analysis" value="load"><span data-t="a_load">Bus load, weekday afternoon</span></label>
+      <label><input type="radio" name="analysis" value="access"><span data-t="a_access">Near frequent service</span></label>
+    </div>
+    <div class="legend" id="alegend" hidden></div>
   </div>
   <div class="group">
     <span class="label" data-t="flows">Time of day (OD data)</span>
@@ -145,9 +158,15 @@ const TEXT = {
         covid: 'COVID low', covered: 'Route marks cover', ofboard: 'of boardings (routes renamed or withdrawn since have no line on the current map).', paxpath: 'Passengers', perday: 'trips per weekday', endcbd: 'end in the CBD', startcbd: 'start in the CBD',
         playyears: 'Play 2016 to 2026', stopyears: 'Stop', buildings: 'buildings in OSM, highlighted = first mapped this year',
         style: 'Map style', pixel: 'Pixel city', night: 'Night network', centre: 'City centre',
-        note: "Every number on this map comes from the Translink origin-destination files (monthly boardings from stop to stop, by route and time of day); the GTFS timetable is used only to place stops and draw route lines. Large marks moving along the route lines show route activity: one per 150 boardings per day on that route (a bus or ferry route's figure split between its two directions; rail and light rail shared across their lines, as the OD data does not name the line). They show how busy each route is, not where vehicles are. Small moving dots are passengers on the 400 busiest stop-to-stop trips, drawn along the route they rode (rail and light rail along the shortest track path, as the OD data does not name the line), one dot per 40 trips per day, on one scale for every year; their speed on screen is illustrative, as the OD data has no travel times. Buildings are inner Brisbane as mapped in OpenStreetMap on 1 July of each year: growth mostly shows mapping catching up, not construction. The rest of SEQ shows about 1.5 million buildings: 303,357 from today's OSM (Geofabrik extract, 8 Nov 2026) and 1.2 million Microsoft machine-learned footprints where OSM has none (heights mostly model estimates). From April 2026 the OD data covers more trips. Drag to pan, right-drag to tilt.",
-        src: 'Data: Translink Origin-Destination Trips (CC BY 4.0); Translink SEQ GTFS for stop locations and route lines only (CC BY 4.0); State of Queensland. Base map and buildings © OpenStreetMap contributors (ODbL); extra buildings Microsoft Global ML Building Footprints (ODbL). Team Pengen Lulus, DataNova 2026.',
-        loading: 'Loading the data…', failed: 'The data could not be loaded. Reload the page to try again.' },
+        note: "Every number on this map comes from the Translink origin-destination files (monthly boardings from stop to stop, by route and time of day); the GTFS timetable is used only to place stops and draw route lines. Large marks moving along the route lines show route activity: one per 150 boardings per day on that route (a bus or ferry route's figure split between its two directions; rail and light rail shared across their lines, as the OD data does not name the line). They show how busy each route is, not where vehicles are. Small moving dots are passengers on the 400 busiest stop-to-stop trips, drawn along the route they rode (rail and light rail along the shortest track path, as the OD data does not name the line), one dot per 40 trips per day, on one scale for every year; their speed on screen is illustrative, as the OD data has no travel times. Buildings are inner Brisbane as mapped in OpenStreetMap on 1 July of each year: growth mostly shows mapping catching up, not construction. The rest of SEQ shows about 1.5 million buildings: 303,357 from today's OSM (Geofabrik extract, 8 Nov 2026) and 1.2 million Microsoft machine-learned footprints where OSM has none (heights mostly model estimates). From April 2026 the OD data covers more trips. The optional Round 2 layers also use the GTFS timetable (scheduled trips and stop departures) and ABS population, Census and SEIFA data. Drag to pan, right-drag to tilt.",
+        src: 'Data: Translink Origin-Destination Trips (CC BY 4.0); Translink SEQ GTFS for stop locations and route lines only (CC BY 4.0); State of Queensland. Base map and buildings © OpenStreetMap contributors (ODbL); extra buildings Microsoft Global ML Building Footprints (ODbL). Round 2 layers also use ABS population, Census and SEIFA (CC BY 4.0). Team Pengen Lulus, DataNova 2026.',
+        loading: 'Loading the data…', failed: 'The data could not be loaded. Reload the page to try again.',
+        analysis: 'Round 2 analysis', a_off: 'Off', a_load: 'Bus load, weekday afternoon', a_access: 'Near frequent service',
+        loadLegend: 'Bus passengers passing along each segment, weekdays 15:00 to 18:59, May to Jul 2026, all routes summed. From trips with a recorded tap-off, scaled to all boardings; an average, not a crowding count.',
+        accessLegend: 'Share of residents within 400 m (straight line) of a stop with about 4 departures an hour, 07:00 to 19:00, on Wed 25 Nov 2026. ABS 2021 Census and 2025 population; SEIFA 2021.',
+        perPm: 'passengers per weekday afternoon', topRoutes: 'busiest routes here (passengers per afternoon, average on board per trip)', onboard: 'on board per trip',
+        residents: 'residents (2025)', nearFreq: 'near frequent service', nearAny: 'near any stop', depk: 'stop departures per 1,000 residents', irsd: 'SEIFA disadvantage decile (1 = most disadvantaged)',
+        loadingLayer: 'Loading…' },
   id: { title: 'SEQ Transit Bergerak', sub: 'Penumpang dari data asal-tujuan (OD) Translink, 2016 sampai 2026: di mana mereka naik dan turun, per bulan dan waktu.',
         flows: 'Waktu (data OD)',
         am: 'Hari kerja s.d. 08.30', mid: '08.30 s.d. 15.00', pm: '15.00 s.d. 19.00', eve: 'Setelah 19.00', wkd: 'Akhir pekan', off: 'Mati', modes: 'Moda',
@@ -159,9 +178,15 @@ const TEXT = {
         covid: 'titik terendah COVID', covered: 'Penanda rute mencakup', ofboard: 'penumpang naik (rute yang sudah berganti nama atau dihapus tidak punya garis di peta hari ini).', paxpath: 'Penumpang', perday: 'perjalanan per hari kerja', endcbd: 'berakhir di CBD', startcbd: 'berangkat dari CBD',
         playyears: 'Putar 2016 sampai 2026', stopyears: 'Berhenti', buildings: 'bangunan di OSM, yang menyala = pertama dipetakan tahun ini',
         style: 'Gaya peta', pixel: 'Kota piksel', night: 'Jaringan malam', centre: 'Pusat kota',
-        note: 'Semua angka di peta ini berasal dari file asal-tujuan (OD) Translink (jumlah penumpang per bulan dari halte ke halte, per rute dan waktu); jadwal GTFS hanya dipakai untuk menaruh halte dan menggambar garis rute. Penanda besar yang bergerak di garis rute menunjukkan aktivitas rute: satu penanda per 150 penumpang naik per hari di rute itu (angka rute bus atau feri dibagi ke kedua arahnya; kereta dan light rail dibagi ke semua jalurnya karena data OD tidak menyebut nama jalur). Penanda ini menunjukkan seberapa ramai rute, bukan posisi kendaraan. Titik kecil yang mengalir adalah penumpang pada 400 perjalanan halte-ke-halte tersibuk, digambar sepanjang rute yang dinaiki (kereta dan light rail lewat jalur rel terpendek, karena data OD tidak menyebut nama jalurnya), satu titik per 40 perjalanan per hari, dengan skala yang sama untuk semua tahun; kecepatannya di layar hanya ilustrasi karena data OD tidak memuat waktu tempuh. Bangunan adalah pusat Brisbane seperti yang dipetakan di OpenStreetMap pada 1 Juli tiap tahun: pertambahannya sebagian besar karena pemetaan makin lengkap, bukan pembangunan. Wilayah SEQ lainnya menampilkan sekitar 1,5 juta bangunan: 303.357 dari OSM saat ini (ekstrak Geofabrik, 8 Nov 2026) dan 1,2 juta jejak bangunan hasil machine learning Microsoft di tempat yang belum dipetakan OSM (tinggi sebagian besar perkiraan model). Sejak April 2026 data OD mencakup lebih banyak perjalanan. Geser untuk memindah peta, klik kanan dan geser untuk memiringkan.',
-        src: 'Data: Translink Origin-Destination Trips (CC BY 4.0); Translink SEQ GTFS hanya untuk lokasi halte dan garis rute (CC BY 4.0); State of Queensland. Bangunan © kontributor OpenStreetMap (ODbL); bangunan tambahan Microsoft Global ML Building Footprints (ODbL). Tim Pengen Lulus, DataNova 2026.',
-        loading: 'Memuat data…', failed: 'Data gagal dimuat. Muat ulang halaman untuk mencoba lagi.' },
+        note: 'Semua angka di peta ini berasal dari file asal-tujuan (OD) Translink (jumlah penumpang per bulan dari halte ke halte, per rute dan waktu); jadwal GTFS hanya dipakai untuk menaruh halte dan menggambar garis rute. Penanda besar yang bergerak di garis rute menunjukkan aktivitas rute: satu penanda per 150 penumpang naik per hari di rute itu (angka rute bus atau feri dibagi ke kedua arahnya; kereta dan light rail dibagi ke semua jalurnya karena data OD tidak menyebut nama jalur). Penanda ini menunjukkan seberapa ramai rute, bukan posisi kendaraan. Titik kecil yang mengalir adalah penumpang pada 400 perjalanan halte-ke-halte tersibuk, digambar sepanjang rute yang dinaiki (kereta dan light rail lewat jalur rel terpendek, karena data OD tidak menyebut nama jalurnya), satu titik per 40 perjalanan per hari, dengan skala yang sama untuk semua tahun; kecepatannya di layar hanya ilustrasi karena data OD tidak memuat waktu tempuh. Bangunan adalah pusat Brisbane seperti yang dipetakan di OpenStreetMap pada 1 Juli tiap tahun: pertambahannya sebagian besar karena pemetaan makin lengkap, bukan pembangunan. Wilayah SEQ lainnya menampilkan sekitar 1,5 juta bangunan: 303.357 dari OSM saat ini (ekstrak Geofabrik, 8 Nov 2026) dan 1,2 juta jejak bangunan hasil machine learning Microsoft di tempat yang belum dipetakan OSM (tinggi sebagian besar perkiraan model). Sejak April 2026 data OD mencakup lebih banyak perjalanan. Lapisan babak 2 (opsional) juga memakai jadwal GTFS (perjalanan terjadwal dan keberangkatan di halte) serta data penduduk, Sensus, dan SEIFA dari ABS. Geser untuk memindah peta, klik kanan dan geser untuk memiringkan.',
+        src: 'Data: Translink Origin-Destination Trips (CC BY 4.0); Translink SEQ GTFS hanya untuk lokasi halte dan garis rute (CC BY 4.0); State of Queensland. Bangunan © kontributor OpenStreetMap (ODbL); bangunan tambahan Microsoft Global ML Building Footprints (ODbL). Lapisan babak 2 juga memakai data penduduk, Sensus, dan SEIFA dari ABS (CC BY 4.0). Tim Pengen Lulus, DataNova 2026.',
+        loading: 'Memuat data…', failed: 'Data gagal dimuat. Muat ulang halaman untuk mencoba lagi.',
+        analysis: 'Analisis babak 2', a_off: 'Mati', a_load: 'Beban bus, sore hari kerja', a_access: 'Dekat layanan sering',
+        loadLegend: 'Penumpang bus yang melewati tiap ruas, hari kerja 15.00 s.d. 18.59, Mei s.d. Jul 2026, semua rute dijumlahkan. Dari perjalanan yang tercatat tap-off-nya, diskalakan ke semua boarding; rata-rata, bukan hitungan kepadatan.',
+        accessLegend: 'Porsi penduduk dalam 400 m (garis lurus) dari halte dengan sekitar 4 keberangkatan per jam, 07.00 s.d. 19.00, Rabu 25 Nov 2026. Sensus 2021 dan penduduk 2025 dari ABS; SEIFA 2021.',
+        perPm: 'penumpang per sore hari kerja', topRoutes: 'rute tersibuk di sini (penumpang per sore, rata-rata di dalam bus per trip)', onboard: 'di dalam bus per trip',
+        residents: 'penduduk (2025)', nearFreq: 'dekat layanan sering', nearAny: 'dekat halte mana pun', depk: 'keberangkatan per 1.000 penduduk', irsd: 'desil ketertinggalan SEIFA (1 = paling tertinggal)',
+        loadingLayer: 'Memuat…' },
 };
 const MODE_RGB = [[255, 90, 78], [79, 155, 255], [61, 220, 132], [255, 194, 51]];
 const NET_RGB = [[70, 46, 54], [40, 62, 104], [30, 76, 56], [82, 70, 38]];
@@ -171,7 +196,7 @@ let lang = 'en';
 try { if (localStorage.getItem('seq-motion-lang') === 'id') lang = 'id'; } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const PERIODS = ['am', 'mid', 'pm', 'eve', 'wkd'];
-const state = { flows: 'am', month: -1, style: 'pixel', modes: new Set([0, 1, 2, 3]) };
+const state = { flows: 'am', month: -1, style: 'pixel', modes: new Set([0, 1, 2, 3]), analysis: 'off' };
 // Two looks over the same data. Pixel: warm daylight palette, buildings tinted by height like a tiny model city.
 const LOOK = {
   pixel: { water: [126, 178, 214], park: [163, 204, 120], river: [126, 178, 214], net: [[214, 160, 150], [150, 175, 215], [150, 200, 160], [220, 195, 130]],
@@ -255,6 +280,46 @@ async function load() {
   }
   const roads = ['motorway', 'trunk', 'primary'].flatMap((k, i) => region.roads[k].map((p) => ({ k: i, p })));
   return { network, months: fl.months, segs, maxTrips, buildings, land, region, roads };
+}
+
+// Round 2 layers (load along bus routes; access to frequent service by area) are fetched the first time they are chosen.
+const extra = {};
+function loadExtra(kind) {
+  if (extra[kind]) return;
+  extra[kind] = 'loading';
+  const file = kind === 'load' ? 'load_pm.json' : 'access_sa2.json';
+  fetch(file).then((r) => { if (!r.ok) throw new Error(file); return r.json(); }).then((j) => {
+    if (kind === 'load') {
+      const segs = j.segments.map((f) => { const x = undelta(f.x, 1e5), y = undelta(f.y, 1e5); return { ...f, pth: x.map((v, i) => [v, y[i]]) }; });
+      extra.load = { segs, max: Math.max(...segs.map((f) => f.v)) };
+    } else {
+      extra.access = j.areas.map((a) => { const x = undelta(a.x, 1e4), y = undelta(a.y, 1e4); return { ...a, poly: x.map((v, i) => [v, y[i]]) }; });
+    }
+    drawLegend(); render();
+  }).catch(() => { delete extra[kind]; drawLegend(); });
+}
+const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+const ramp = (stops, t) => {
+  t = Math.max(0, Math.min(1, t));
+  const i = Math.min(stops.length - 2, Math.floor(t * (stops.length - 1)));
+  return mix(stops[i], stops[i + 1], t * (stops.length - 1) - i);
+};
+const LOAD_RAMP = [[255, 222, 140], [240, 120, 60], [200, 30, 50], [110, 10, 70]];
+const ACCESS_RAMP = [[200, 50, 50], [240, 190, 110], [70, 150, 190]];
+const loadT = (v) => Math.log(v / 20) / Math.log(extra.load.max / 20);  // 20 passengers is the smallest segment drawn
+function drawLegend() {
+  const T = TEXT[lang], el = $('alegend'), k = state.analysis;
+  el.hidden = k === 'off';
+  if (k === 'off') return;
+  const css = (stops) => 'linear-gradient(90deg,' + stops.map((c) => `rgb(${c})`).join(',') + ')';
+  const ready = extra[k] && extra[k] !== 'loading';
+  if (k === 'load') {
+    const max = ready ? fmt(extra.load.max) : '…';
+    el.innerHTML = `<div class="ramp" style="background:${css(LOAD_RAMP)}"></div><div class="ends"><span>20</span><span>${max} ${T.perPm}</span></div>${T.loadLegend}`;
+  } else {
+    el.innerHTML = `<div class="ramp" style="background:${css(ACCESS_RAMP)}"></div><div class="ends"><span>0%</span><span>100% ${T.nearFreq}</span></div>${T.accessLegend}`;
+  }
+  if (!ready) el.insertAdjacentHTML('afterbegin', `<b>${T.loadingLayer}</b> `);
 }
 
 const bCache = {};
@@ -385,7 +450,7 @@ function layers() {
   const clockSec = performance.now() / 1000;
   const people = tokens.map((k) => ({ m: k.m, p: pointAt(data.segs[k.s].path, data.segs[k.s].cum, (clockSec / k.dur + k.ph) % 1) }));
   const period = state.flows === 'off' ? 'am' : state.flows;
-  const movers = cached('movers', [state.month, period, ...state.modes].join(), () => routeMovers(mo, period)).map((v) => {
+  const movers = state.analysis !== 'off' ? NONE : cached('movers', [state.month, period, ...state.modes].join(), () => routeMovers(mo, period)).map((v) => {
     const d = data.network[v.i];
     return { m: v.m, p: pointAt(d.path, d.cum, (clockSec / v.dur + v.ph) % 1) };
   });
@@ -408,6 +473,9 @@ function layers() {
     new deck.PolygonLayer({ id: 'parks', data: data.land.parks, getPolygon: (p) => p, getFillColor: L.park, updateTriggers: { getFillColor: st } }),
     new deck.PathLayer({ id: 'rivers', data: data.land.rivers, getPath: (r) => r.p, getWidth: (r) => r.w, getColor: L.river,
       capRounded: true, jointRounded: true, updateTriggers: { getColor: st } }),
+    ...(state.analysis === 'access' && Array.isArray(extra.access) ? [new deck.PolygonLayer({ id: 'access', data: extra.access,
+      getPolygon: (a) => a.poly, getFillColor: (a) => [...ramp(ACCESS_RAMP, a.f), 150], stroked: true, getLineColor: [255, 255, 255, 140],
+      lineWidthMinPixels: 0.6, pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 90] })] : NONE),
     new deck.PolygonLayer({ id: 'buildings', data: buildingsFor(year), getPolygon: (b) => b.poly, extruded: true,
       wireframe: st === 'pixel' && !far, getLineColor: [120, 84, 52, 200],
       getElevation: (b) => b.h, getFillColor: (b) => (b.y0 === year && year > 2016 ? L.fresh : L.build(b.h)),
@@ -430,6 +498,9 @@ function layers() {
       radiusMinPixels: 4, radiusMaxPixels: 7, getRadius: 60, stroked: true, getLineColor: [20, 24, 36, 230], lineWidthMinPixels: 1.2 }),
     new deck.ScatterplotLayer({ id: 'people', parameters: ON_TOP, data: people, getPosition: (d) => d.p, getFillColor: (d) => MODE_RGB[d.m],
       radiusMinPixels: 2, radiusMaxPixels: 4, getRadius: 30, stroked: true, getLineColor: [255, 255, 255, 160], lineWidthMinPixels: 0.5 }),
+    ...(state.analysis === 'load' && extra.load && extra.load.segs ? [new deck.PathLayer({ id: 'load', parameters: ON_TOP, data: extra.load.segs,
+      getPath: (f) => f.pth, getColor: (f) => ramp(LOAD_RAMP, loadT(f.v)), getWidth: (f) => 1 + 11 * Math.sqrt(f.v / extra.load.max),
+      widthUnits: 'pixels', capRounded: true, jointRounded: true, pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 220] })] : NONE),
   ];
 }
 
@@ -439,6 +510,11 @@ function tooltipText(o) {
   if (!o) return null;
   const T = TEXT[lang], k = state.flows === 'off' ? 'am' : state.flows, mo = data.months[state.month];
   const when = `${T.full[k]}, ${monthLabel(mo.key)}`;
+  const dec = (t) => String(t).replace('.', lang === 'id' ? ',' : '.');
+  if (o.pth) return `${o.a} \u2192 ${o.b}\n${fmt(o.v)} ${T.perPm}\n${T.topRoutes}:\n` +
+    o.r.map(([r, d, v, t]) => `  ${r} ${d}: ${fmt(v)}` + (t == null ? '' : `, ${dec(t)} ${T.onboard}`)).join('\n');
+  if (o.poly && o.q) return `${o.n}\n${fmt(o.p)} ${T.residents}\n${pct(o.f)} ${T.nearFreq}, ${pct(o.a)} ${T.nearAny}\n` +
+    `${fmt(o.d)} ${T.depk}\n${T.irsd}: ${o.q}`;
   if (Array.isArray(o)) return `${T.paxpath}: ${T['m' + o[2]]}\n${fmt(Math.round(o[1]))} ${k === 'wkd' ? T.perwkd : T.perday}\n${when}`;
   if (o.path) {
     const odName = o.m === 1 ? 'Rail' : o.m === 2 ? 'GCLR' : o.r, n = mo[k].routes[odName];
@@ -544,6 +620,15 @@ function wire() {
   $('playyears').addEventListener('click', () => { if (data) toggleYears(); });
   $('style').addEventListener('change', (e) => { state.style = e.target.value; lowRes = null; applyStyle(); });
   $('centre').addEventListener('click', flyToCentre);
+  $('analysis').addEventListener('change', (e) => {
+    state.analysis = e.target.value;
+    if (state.analysis !== 'off') {
+      loadExtra(state.analysis);
+      state.flows = 'off'; document.querySelector('#flows input[value="off"]').checked = true;
+      if (data) drawYears();
+    }
+    drawLegend(); render();
+  });
   $('flows').addEventListener('change', (e) => { state.flows = e.target.value; if (data) { drawYears(); render(); } });
   $('modes').addEventListener('change', () => {
     state.modes = new Set([...document.querySelectorAll('#modes input:checked')].map((i) => +i.value)); render();
@@ -551,7 +636,7 @@ function wire() {
   $('lang').addEventListener('click', () => {
     lang = lang === 'en' ? 'id' : 'en';
     try { localStorage.setItem('seq-motion-lang', lang); } catch (e) {}
-    applyText(); if (data) { drawYears(); render(); }
+    applyText(); drawLegend(); if (data) { drawYears(); render(); }
   });
 }
 
