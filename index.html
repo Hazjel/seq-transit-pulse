@@ -81,6 +81,10 @@ input[type=range] { flex: 1; min-width: 0; accent-color: var(--flow); }
 .lang { position: fixed; z-index: 2; top: calc(16px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); background: var(--panel); }
 .status { position: fixed; inset: 0; display: grid; place-items: center; color: var(--dim); font-size: 18px; z-index: 1; }
 .status[hidden] { display: none; }
+/* No-WebGL message: beside the control panel, not under it. */
+.status.nogl { padding: 24px 32px 24px 390px; text-align: center; line-height: 1.45; color: var(--ink); }
+#map.pixel ~ .status.nogl { color: #3a3226; }
+@media (max-width: 640px) { .status.nogl { padding: 24px 20px 55vh; } }
 @media (max-width: 640px) {
   .panel { top: auto; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); left: max(12px, env(safe-area-inset-left, 0px));
            right: max(12px, env(safe-area-inset-right, 0px)); width: auto; max-width: none; gap: 10px; padding: 14px; }
@@ -650,7 +654,7 @@ load().then((d) => {
   const small = window.innerWidth < 640;
   $('map').classList.add('pixel');
   // Some embedded viewers (e.g. Tableau Desktop's web object) have no WebGL 2: say so instead of showing a blank map.
-  if (!document.createElement('canvas').getContext('webgl2')) { $('status').textContent = TEXT[lang].nogl; $('status').hidden = false; return; }
+  if (!document.createElement('canvas').getContext('webgl2')) { $('status').textContent = TEXT[lang].nogl; $('status').classList.add('nogl'); $('status').hidden = false; return; }
   deckgl = new deck.Deck({
     parent: $('map'),
     views: new deck.MapView({ orthographic: true, controller: true }),
